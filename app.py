@@ -1,9 +1,8 @@
-from flask import Flask, render_template, session, request, redirect, url_for
-from werkzeug.security import check_password_hash
-from database.db import get_db
+from flask import Flask, render_template
+from database.db import get_db, init_db, seed_db
 
 app = Flask(__name__)
-app.secret_key = "dev-secret-change-in-prod"
+app.secret_key = 'dev'
 
 
 # ------------------------------------------------------------------ #
@@ -15,10 +14,44 @@ def landing():
     return render_template("landing.html")
 
 
-@app.route("/register")
+@app.route("/register", methods=["GET", "POST"])
 def register():
-    if session.get("user_id"):
-        return redirect(url_for("landing"))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+
+        errors = []
+        if not name:
+            errors.append("Full name is required.")
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            errors.append("Enter a valid email address.")
+        if len(password) < 8:
+            errors.append("Password must be at least 8 characters.")
+        if password != confirm:
+            errors.append("Passwords do not match.")
+
+        if not errors:
+            db = get_db()
+            existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+            if existing:
+                errors.append("An account with that email already exists.")
+                db.close()
+
+        if errors:
+            return render_template("register.html", errors=errors, name=name, email=email)
+
+        db.execute(
+            "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+            (name, email, generate_password_hash(password))
+        )
+        db.commit()
+        db.close()
+
+        flash("Account created — please log in", "success")
+        return redirect(url_for("login"))
+
     return render_template("register.html")
 
 
@@ -82,6 +115,10 @@ def edit_expense(id):
 def delete_expense(id):
     return "Delete expense — coming in Step 9"
 
+
+with app.app_context():
+    init_db()
+    seed_db()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
